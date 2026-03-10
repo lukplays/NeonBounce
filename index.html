@@ -163,7 +163,6 @@
     const scoreElement = document.getElementById("currentScore");
     const bestScoreElement = document.getElementById("bestScore");
     const scoreboard = document.getElementById("scoreboard");
-    const adContainer = document.getElementById("ad-container");
     const gameOverUI = document.getElementById("game-over-ui");
     const nickOverlay = document.getElementById("nick-overlay");
     const nickInput = document.getElementById("nick-input");
@@ -179,6 +178,7 @@
         localStorage.setItem("neonBallNick", window.playerNick);
         nickOverlay.style.display = "none";
         gameActive = true;
+        gameStarted = false; // czeka na pierwsze tapnięcie
         if(window.loadLeaderboard) window.loadLeaderboard();
     };
 
@@ -221,71 +221,159 @@
         openRandomVideo();
     }, { passive: false });
 
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    function playSound(f, t, d, v) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-        o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
-        g.gain.setValueAtTime(v, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + d);
-        o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + d);
+    // ── AUDIO (lazy init) ──────────────────────────────────────────────
+    let audioCtx = null;
+    function getAudioCtx() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        return audioCtx;
     }
-    const sfx = { jump: () => playSound(480,'triangle',0.1,0.3), score: () => playSound(950,'sine',0.2,0.12), hit: () => { playSound(120,'sawtooth',0.4,0.2); playSound(80,'sine',0.5,0.2); } };
+    function playSound(f, t, d, v) {
+        try {
+            const ac = getAudioCtx();
+            if (ac.state === 'suspended') ac.resume();
+            const o = ac.createOscillator(), g = ac.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, ac.currentTime);
+            g.gain.setValueAtTime(v, ac.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + d);
+            o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + d);
+        } catch(e) {}
+    }
+    const sfx = {
+        jump:  () => playSound(480, 'triangle', 0.1, 0.3),
+        score: () => playSound(950, 'sine',     0.2, 0.12),
+        hit:   () => { playSound(120, 'sawtooth', 0.4, 0.2); playSound(80, 'sine', 0.5, 0.2); }
+    };
 
-    const bgCanvas = document.createElement('canvas'); bgCanvas.width = 400; bgCanvas.height = 600;
-    const bgCtx = bgCanvas.getContext('2d'); bgCtx.fillStyle = "#000"; bgCtx.fillRect(0,0,400,600);
-    bgCtx.strokeStyle = "#151515";
-    for(let i=0;i<400;i+=40){bgCtx.beginPath();bgCtx.moveTo(i,0);bgCtx.lineTo(i,600);bgCtx.stroke();}
-    for(let i=0;i<600;i+=40){bgCtx.beginPath();bgCtx.moveTo(0,i);bgCtx.lineTo(400,i);bgCtx.stroke();}
+    // ── BACKGROUND (pre-rendered once) ────────────────────────────────
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = 400; bgCanvas.height = 600;
+    const bgCtx = bgCanvas.getContext('2d');
+    bgCtx.fillStyle = "#000"; bgCtx.fillRect(0, 0, 400, 600);
+    bgCtx.strokeStyle = "#151515"; bgCtx.beginPath();
+    for (let i = 0; i < 400; i += 40) { bgCtx.moveTo(i, 0); bgCtx.lineTo(i, 600); }
+    for (let i = 0; i < 600; i += 40) { bgCtx.moveTo(0, i); bgCtx.lineTo(400, i); }
+    bgCtx.stroke(); // jeden draw call zamiast wielu
 
-    let particles = [];
-    function createExplosion(x,y,c){for(let i=0;i<20;i++)particles.push({x,y,vx:(Math.random()-0.5)*12,vy:(Math.random()-0.5)*12,radius:Math.random()*3+1,alpha:1,color:c});}
+    // ── TRAIL (ring buffer – zero alokacji co klatkę) ──────────────────
+    const TRAIL_LEN = 12;
+    const trailX = new Float32Array(TRAIL_LEN);
+    const trailY = new Float32Array(TRAIL_LEN);
+    let trailHead = 0, trailCount = 0;
 
-    let score = 0, bestScore = localStorage.getItem("neonBallBestScore") || 0;
+    function trailPush(x, y) {
+        trailX[trailHead] = x; trailY[trailHead] = y;
+        trailHead = (trailHead + 1) % TRAIL_LEN;
+        if (trailCount < TRAIL_LEN) trailCount++;
+    }
+    function trailClear() { trailHead = 0; trailCount = 0; }
+
+    // ── PARTICLES (object pool – zero alokacji po starcie) ────────────
+    const POOL_SIZE = 60; // max 3 eksplozje x 20
+    const pool = Array.from({ length: POOL_SIZE }, () =>
+        ({ x:0, y:0, vx:0, vy:0, radius:0, alpha:0, active:false })
+    );
+    let activeParticles = 0;
+
+    function createExplosion(x, y) {
+        let spawned = 0;
+        for (let i = 0; i < POOL_SIZE && spawned < 20; i++) {
+            if (!pool[i].active) {
+                const p = pool[i];
+                p.x = x; p.y = y;
+                p.vx = (Math.random() - 0.5) * 12;
+                p.vy = (Math.random() - 0.5) * 12;
+                p.radius = Math.random() * 3 + 1;
+                p.alpha = 1; p.active = true;
+                spawned++; activeParticles++;
+            }
+        }
+    }
+
+    // ── GAME STATE ─────────────────────────────────────────────────────
+    let score = 0, bestScore = Number(localStorage.getItem("neonBallBestScore")) || 0;
     bestScoreElement.innerText = bestScore;
     let gameActive = false, gameStarted = false, canRestart = true, firstLoad = true, frameCount = 0;
-    
-    const ball = { x: 100, y: 300, radius: 12, gravity: 0.6, velocity: 0, jump: -8, color: "#f0f", trail: [] };
-    let pipes = []; const pipeWidth = 55, basePipeGap = 165, pipeSpeed = 3.2;
+
+    const ball = { x: 100, y: 300, radius: 12, gravity: 0.6, velocity: 0, jump: -8, color: "#f0f" };
+    let pipes = [];
+    const pipeWidth = 55, basePipeGap = 165, pipeSpeed = 3.2;
+
+    // ── FPS CAP (60 fps niezależnie od częstotliwości ekranu) ──────────
+    const TARGET_FPS = 60;
+    const FRAME_MS  = 1000 / TARGET_FPS;
+    let lastTime = 0;
+
+    // ── PIPE COLORS (buforowane) ───────────────────────────────────────
+    const PIPE_COLORS = { STATIC: "#0ff", MOVING: "#0f0", SHRINKING: "#ff0" };
 
     function createPipe() {
-        const type = ['STATIC', 'MOVING', 'SHRINKING'][Math.floor(Math.random() * 3)];
-        let scoreDifficultyReduction = Math.min(0.25, Math.floor(score / 20) * 0.05);
-        let currentGap = basePipeGap * (1 - scoreDifficultyReduction);
-        if (type === 'STATIC') { currentGap *= 0.90; }
-        const h = Math.floor(Math.random() * (600 - currentGap - 200)) + 100;
-        pipes.push({ x: 400, top: h, baseTop: h, passed: false, type, offset: Math.random() * Math.PI * 2, currentGap: currentGap, maxGap: currentGap, shrinkDir: Math.random() > 0.5 ? 'TOP' : 'BOTTOM' });
+        const types = ['STATIC', 'MOVING', 'SHRINKING'];
+        const type = types[Math.floor(Math.random() * 3)];
+        const reduction = Math.min(0.25, Math.floor(score / 20) * 0.05);
+        let gap = basePipeGap * (1 - reduction);
+        if (type === 'STATIC') gap *= 0.90;
+        const h = Math.floor(Math.random() * (600 - gap - 200)) + 100;
+        pipes.push({ x: 400, top: h, baseTop: h, passed: false, type,
+            offset: Math.random() * Math.PI * 2, currentGap: gap, maxGap: gap,
+            shrinkDir: Math.random() > 0.5 ? 'TOP' : 'BOTTOM' });
     }
 
+    // ── DRAW ───────────────────────────────────────────────────────────
     function draw() {
         ctx.drawImage(bgCanvas, 0, 0);
-        
-        pipes.forEach(p => {
-            ctx.fillStyle = "#022"; ctx.strokeStyle = p.type === 'STATIC' ? "#0ff" : (p.type === 'MOVING' ? "#0f0" : "#ff0");
-            ctx.lineWidth = 3; ctx.fillRect(p.x, 0, pipeWidth, p.top); ctx.strokeRect(p.x, 0, pipeWidth, p.top);
-            let bY = p.top + p.currentGap; ctx.fillRect(p.x, bY, pipeWidth, 600 - bY); ctx.strokeRect(p.x, bY, pipeWidth, 600 - bY);
-        });
 
-        if (gameActive || !gameStarted) {
-            ball.trail.forEach((pos, index) => {
-                const alpha = 1 - (index / ball.trail.length);
-                ctx.globalAlpha = alpha * 0.4;
-                ctx.beginPath();
-                ctx.arc(pos.x - (index * 2), pos.y, ball.radius * (1 - index/15), 0, Math.PI * 2);
-                ctx.fillStyle = ball.color;
-                ctx.fill();
-            });
-            ctx.globalAlpha = 1.0;
-            ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-            ctx.fillStyle = ball.color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+        // Rury – grupujemy fill i stroke osobno żeby minimalizować zmiany stanu
+        ctx.fillStyle = "#022";
+        ctx.lineWidth = 3;
+        for (let i = 0; i < pipes.length; i++) {
+            const p = pipes[i];
+            const bY = p.top + p.currentGap;
+            ctx.fillRect(p.x, 0, pipeWidth, p.top);
+            ctx.fillRect(p.x, bY, pipeWidth, 600 - bY);
+        }
+        for (let i = 0; i < pipes.length; i++) {
+            const p = pipes[i];
+            const bY = p.top + p.currentGap;
+            ctx.strokeStyle = PIPE_COLORS[p.type];
+            ctx.strokeRect(p.x, 0, pipeWidth, p.top);
+            ctx.strokeRect(p.x, bY, pipeWidth, 600 - bY);
         }
 
-        particles.forEach((p, i) => {
-            p.x += p.vx; p.y += p.vy; p.alpha -= 0.02; ctx.globalAlpha = Math.max(0, p.alpha);
-            ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2); ctx.fill();
-            if (p.alpha <= 0) particles.splice(i, 1);
-        });
-        ctx.globalAlpha = 1;
+        if (gameActive || !gameStarted) {
+            // Trail – jedna ścieżka zamiast 12 osobnych beginPath
+            ctx.fillStyle = ball.color;
+            for (let i = 0; i < trailCount; i++) {
+                const idx = (trailHead - 1 - i + TRAIL_LEN) % TRAIL_LEN;
+                const alpha = (1 - i / trailCount) * 0.4;
+                const r = ball.radius * (1 - i / 15);
+                if (r <= 0) continue;
+                ctx.globalAlpha = alpha;
+                ctx.beginPath();
+                ctx.arc(trailX[idx] - i * 2, trailY[idx], r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // Piłka
+            ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = ball.color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+            ctx.fill(); ctx.stroke();
+        }
+
+        // Cząsteczki – jeden kolor więc batch po kolorze nie jest potrzebny,
+        // ale łączymy update + draw żeby nie iterować dwa razy
+        if (activeParticles > 0) {
+            for (let i = 0; i < POOL_SIZE; i++) {
+                const p = pool[i];
+                if (!p.active) continue;
+                p.x += p.vx; p.y += p.vy; p.alpha -= 0.02;
+                if (p.alpha <= 0) { p.active = false; activeParticles--; continue; }
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = ball.color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
 
         if (firstLoad && gameActive && !gameStarted) {
             ctx.fillStyle = "#fff"; ctx.font = "bold 18px Arial"; ctx.textAlign = "center";
@@ -293,72 +381,94 @@
         }
     }
 
+    // ── UPDATE ─────────────────────────────────────────────────────────
     function update() {
         if (!gameActive || !gameStarted) return;
-        frameCount++; 
-        ball.velocity += ball.gravity; 
+        frameCount++;
+        ball.velocity += ball.gravity;
         ball.y += ball.velocity;
+        trailPush(ball.x, ball.y);
 
-        ball.trail.unshift({ x: ball.x, y: ball.y });
-        if (ball.trail.length > 12) ball.trail.pop();
-
-        if (ball.y + ball.radius > 600 || ball.y - ball.radius < 0) gameOver();
+        if (ball.y + ball.radius > 600 || ball.y - ball.radius < 0) { gameOver(); return; }
         if (pipes.length === 0 || pipes[pipes.length - 1].x < 180) createPipe();
-        
+
         for (let i = pipes.length - 1; i >= 0; i--) {
-            let p = pipes[i]; p.x -= pipeSpeed;
-            if (p.type === 'MOVING') p.top = p.baseTop + Math.sin(frameCount * 0.04 + p.offset) * 50;
-            else if (p.type === 'SHRINKING') {
-                let sVal = Math.abs(Math.sin(frameCount * 0.05 + p.offset)) * 55;
+            const p = pipes[i];
+            p.x -= pipeSpeed;
+            if (p.type === 'MOVING') {
+                p.top = p.baseTop + Math.sin(frameCount * 0.04 + p.offset) * 50;
+            } else if (p.type === 'SHRINKING') {
+                const sVal = Math.abs(Math.sin(frameCount * 0.05 + p.offset)) * 55;
                 if (p.shrinkDir === 'TOP') { p.top = p.baseTop + sVal; p.currentGap = p.maxGap - sVal; }
-                else p.currentGap = p.maxGap - sVal;
+                else { p.currentGap = p.maxGap - sVal; }
             }
-            if (ball.x + ball.radius > p.x && ball.x - ball.radius < p.x + pipeWidth && (ball.y - ball.radius < p.top || ball.y + ball.radius > p.top + p.currentGap)) gameOver();
+            if (ball.x + ball.radius > p.x && ball.x - ball.radius < p.x + pipeWidth &&
+                (ball.y - ball.radius < p.top || ball.y + ball.radius > p.top + p.currentGap)) {
+                gameOver(); return;
+            }
             if (!p.passed && p.x + pipeWidth < ball.x) {
                 score++; p.passed = true; scoreElement.innerText = score; sfx.score();
-                if (score > bestScore) { bestScore = score; bestScoreElement.innerText = bestScore; localStorage.setItem("neonBallBestScore", bestScore); }
+                if (score > bestScore) {
+                    bestScore = score; bestScoreElement.innerText = bestScore;
+                    localStorage.setItem("neonBallBestScore", bestScore);
+                }
             }
             if (p.x + pipeWidth < 0) pipes.splice(i, 1);
         }
     }
 
+    // ── GAME OVER ──────────────────────────────────────────────────────
     function gameOver() {
-        if (gameActive) {
-            sfx.hit();
-            createExplosion(ball.x, ball.y, ball.color);
-            gameActive = false;
-            canRestart = false;
-            setTimeout(() => {
-                canvas.classList.add('dimmed');
-                scoreboard.classList.add('dimmed');
-                document.getElementById("ad-container").classList.add('dimmed');
-                gameOverUI.style.display = "flex";
-                if(window.saveScore) window.saveScore(window.playerNick, score);
-                setTimeout(() => { canRestart = true; }, 300);
-            }, 200); 
-        }
+        if (!gameActive) return;
+        sfx.hit();
+        createExplosion(ball.x, ball.y);
+        gameActive = false;
+        canRestart = false;
+        setTimeout(() => {
+            canvas.classList.add('dimmed');
+            scoreboard.classList.add('dimmed');
+            document.getElementById("ad-container").classList.add('dimmed');
+            gameOverUI.style.display = "flex";
+            if (window.saveScore) window.saveScore(window.playerNick, score);
+            setTimeout(() => { canRestart = true; }, 300);
+        }, 200);
     }
 
+    // ── INPUT ──────────────────────────────────────────────────────────
     function handleAction(e) {
-        if (nickOverlay.style.display !== "none") return;
+        if (nickOverlay.style.display !== "none" && nickOverlay.style.display !== "") return;
         if (e.type === "keydown" && e.code !== "Space") return;
         if (e.cancelable) e.preventDefault();
-        
+
         if (gameActive) {
             if (!gameStarted) { gameStarted = true; firstLoad = false; }
             ball.velocity = ball.jump; sfx.jump();
         } else if (canRestart) {
-            canvas.classList.remove('dimmed'); scoreboard.classList.remove('dimmed'); document.getElementById("ad-container").classList.remove('dimmed');
-            ball.y = 300; ball.velocity = ball.jump; pipes = []; score = 0; scoreElement.innerText = "0";
-            ball.trail = []; particles = []; frameCount = 0; gameActive = true; gameStarted = true; 
+            canvas.classList.remove('dimmed');
+            scoreboard.classList.remove('dimmed');
+            document.getElementById("ad-container").classList.remove('dimmed');
+            ball.x = 100; ball.y = 300; ball.velocity = ball.jump;
+            pipes = []; score = 0; scoreElement.innerText = "0";
+            trailClear(); activeParticles = 0;
+            for (let i = 0; i < POOL_SIZE; i++) pool[i].active = false;
+            frameCount = 0; gameActive = true; gameStarted = true; firstLoad = false;
             gameOverUI.style.display = "none"; sfx.jump();
         }
     }
 
-    function loop() { update(); draw(); requestAnimationFrame(loop); }
+    // ── MAIN LOOP (z FPS cap) ──────────────────────────────────────────
+    function loop(timestamp) {
+        requestAnimationFrame(loop);
+        const delta = timestamp - lastTime;
+        if (delta < FRAME_MS) return; // pomiń klatkę jeśli za wcześnie
+        lastTime = timestamp - (delta % FRAME_MS); // korekcja dryftu
+        update();
+        draw();
+    }
+
     window.addEventListener("keydown", handleAction);
     window.addEventListener("touchstart", handleAction, { passive: false });
-    loop();
+    requestAnimationFrame(loop);
 </script>
 </body>
 </html>
