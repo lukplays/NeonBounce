@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>LUMIN - Neon Arcade</title>
     
     <script type="module">
@@ -49,32 +49,47 @@
     </script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        /* KLUCZOWA POPRAWKA: Używamy dynamicznego viewportu */
+        :root { --app-height: 100%; }
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            height: var(--app-height); 
+            overflow: hidden; background-color: #050505; 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            font-family: 'Courier New', Courier, monospace; touch-action: none; 
+        }
+
         .dimmed { filter: brightness(0.3) blur(2px); transition: filter 0.5s ease; pointer-events: none; }
         
         #nick-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; touch-action: auto; }
-        #nick-input { background: #111; border: 2px solid #f0f; color: #fff; padding: 10px; font-size: 20px; text-align: center; outline: none; margin-bottom: 20px; touch-action: manipulation; }
+        #nick-input { background: #111; border: 2px solid #f0f; color: #fff; padding: 10px; font-size: 20px; text-align: center; outline: none; margin-bottom: 20px; touch-action: manipulation; width: 80%; max-width: 250px; }
         #start-btn { background: #f0f; color: #fff; border: none; padding: 10px 30px; font-weight: bold; cursor: pointer; touch-action: manipulation; }
         
-        #scoreboard { width: 400px; background: #000; border: 2px solid #444; border-bottom: none; box-sizing: border-box; display: flex; justify-content: space-around; padding: 15px 0; transition: filter 0.5s ease; }
+        #scoreboard { width: 400px; max-width: 100vw; background: #000; border: 2px solid #444; border-bottom: none; box-sizing: border-box; display: flex; justify-content: space-around; padding: 10px 0; transition: filter 0.5s ease; flex-shrink: 0; }
         .stat-box { text-align: center; }
-        .label { font-size: 14px; display: block; text-transform: uppercase; letter-spacing: 3px; color: #aaa; margin-bottom: 6px; font-weight: bold; }
+        .label { font-size: 11px; display: block; text-transform: uppercase; letter-spacing: 2px; color: #aaa; margin-bottom: 2px; font-weight: bold; }
         #currentScore { color: #0ff; text-shadow: 0 0 12px #0ff; }
         #bestScore { color: #f0f; text-shadow: 0 0 12px #f0f; }
-        .value { font-size: 36px; font-weight: bold; }
+        .value { font-size: 28px; font-weight: bold; }
         
-        canvas { border: 2px solid #444; background-color: #000; max-width: 100%; display: block; transition: filter 0.5s ease; touch-action: none; -webkit-tap-highlight-color: transparent; }
+        /* Canvas dopasowuje się do wysokości ekranu */
+        canvas { 
+            border: 2px solid #444; background-color: #000; 
+            display: block; transition: filter 0.5s ease; 
+            touch-action: none; -webkit-tap-highlight-color: transparent;
+            max-width: 100vw; max-height: 70vh; object-fit: contain;
+        }
         
-        #game-over-ui { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); width: 280px; display: none; flex-direction: column; align-items: center; z-index: 20; pointer-events: none; }
-        .go-title { color: #fff; font-size: 38px; font-weight: bold; margin-bottom: 5px; text-shadow: 0 0 15px #f0f; }
-        .replay-btn { color: #fff; font-size: 18px; margin-bottom: 20px; font-weight: bold; text-shadow: 0 0 10px #0ff; animation: subtelneMiganie 1.5s ease-in-out infinite; }
+        #game-over-ui { position: absolute; top: 10%; left: 50%; transform: translateX(-50%); width: 280px; max-width: 90vw; display: none; flex-direction: column; align-items: center; z-index: 20; pointer-events: none; }
+        .go-title { color: #fff; font-size: 32px; font-weight: bold; margin-bottom: 5px; text-shadow: 0 0 15px #f0f; }
+        .replay-btn { color: #fff; font-size: 16px; margin-bottom: 15px; font-weight: bold; text-shadow: 0 0 10px #0ff; animation: subtelneMiganie 1.5s ease-in-out infinite; }
         @keyframes subtelneMiganie { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.95); } }
         
-        #leaderboard { width: 100%; background: rgba(20, 20, 20, 0.95); border: 2px solid #0ff; color: #fff; padding: 15px; text-align: center; box-sizing: border-box; box-shadow: 0 0 20px rgba(0, 255, 255, 0.3); }
-        #ad-container { width: 400px; height: 45px; background: #000; border: 2px solid #444; border-top: none; box-sizing: border-box; position: relative; overflow: hidden; cursor: pointer; display: flex; align-items: center; padding-left: 10px; transition: filter 0.5s ease; }
-        #yt-logo { width: 24px; height: 18px; background: #f00; border-radius: 4px; position: relative; display: flex; align-items: center; justify-content: center; margin-right: 10px; flex-shrink: 0; z-index: 2; }
-        #yt-logo::after { content: ""; border-left: 6px solid white; border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
-        #ad-text { white-space: nowrap; color: #ffd700; font-weight: bold; font-size: 13px; transform: translateX(360px); z-index: 1; }
+        #leaderboard { width: 100%; background: rgba(20, 20, 20, 0.95); border: 2px solid #0ff; color: #fff; padding: 10px; text-align: center; box-sizing: border-box; box-shadow: 0 0 20px rgba(0, 255, 255, 0.3); }
+        #ad-container { width: 400px; max-width: 100vw; height: 40px; background: #000; border: 2px solid #444; border-top: none; box-sizing: border-box; position: relative; overflow: hidden; cursor: pointer; display: flex; align-items: center; padding-left: 10px; transition: filter 0.5s ease; flex-shrink: 0; }
+        #yt-logo { width: 20px; height: 14px; background: #f00; border-radius: 4px; position: relative; display: flex; align-items: center; justify-content: center; margin-right: 10px; flex-shrink: 0; z-index: 2; }
+        #yt-logo::after { content: ""; border-left: 5px solid white; border-top: 3px solid transparent; border-bottom: 3px solid transparent; }
+        #ad-text { white-space: nowrap; color: #ffd700; font-weight: bold; font-size: 11px; transform: translateX(360px); z-index: 1; }
         .blink-fast { animation: blinker 0.4s step-start infinite; color: #fff !important; }
         @keyframes blinker { 50% { opacity: 0; } }
     </style>
@@ -82,7 +97,7 @@
 <body>
 
     <div id="nick-overlay">
-        <h2 style="color: #0ff; letter-spacing: 2px;">PILOT IDENTIFICATION</h2>
+        <h2 style="color: #0ff; letter-spacing: 2px; font-size: 18px;">PILOT IDENTIFICATION</h2>
         <input type="text" id="nick-input" placeholder="Enter Nick..." maxlength="10" autocomplete="off">
         <button id="start-btn">ENGAGE</button>
     </div>
@@ -92,14 +107,14 @@
         <div class="stat-box"><span class="label">YOUR BEST</span><span id="bestScore" class="value">0</span></div>
     </div>
 
-    <div style="position: relative;">
+    <div style="position: relative; display: flex; justify-content: center; align-items: center;">
         <canvas id="gameCanvas"></canvas>
         <div id="game-over-ui">
             <div class="go-title">GAME OVER</div>
             <div class="replay-btn">TAP TO REPLAY</div>
             <div id="leaderboard">
-                <h3 style="margin-top:0; color:#f0f;">BEST PLAYERS</h3>
-                <div id="lb-list" style="font-size: 13px; font-family: monospace;"></div>
+                <h3 style="margin-top:0; color:#f0f; font-size: 16px;">BEST PLAYERS</h3>
+                <div id="lb-list" style="font-size: 12px; font-family: monospace;"></div>
             </div>
         </div>
     </div>
@@ -110,6 +125,14 @@
     </div>
 
 <script>
+    // Skrypt poprawiający wysokość na telefonach
+    const appHeight = () => {
+        const doc = document.documentElement;
+        doc.style.setProperty('--app-height', `${window.innerHeight}px`);
+    }
+    window.addEventListener('resize', appHeight);
+    appHeight();
+
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d", { alpha: false });
     const scoreElement = document.getElementById("currentScore");
@@ -135,7 +158,7 @@
     };
 
     const myVideos = ["L3JZS2R_D6k","BJU6OyDPMEY","BzM9CYuPW8M"];
-    const adTexts = ["Wanna see how these LEGO cars were built?", "Epic custom LEGO MOCs!"];
+    const adTexts = ["Build LEGO Cars!", "Epic MOCs!"];
     const adContainerText = document.getElementById("ad-text");
     let isAdRunning = false;
 
@@ -283,9 +306,7 @@
     }
 
     function handleAction(e) {
-        // POPRAWKA: Jeśli overlay z nickiem jest widoczny, nie blokuj akcji (klawiatury/przycisku)
         if (nickOverlay.style.display !== "none") return;
-
         if (e.type === "keydown" && e.code !== "Space") return;
         if (e.cancelable) e.preventDefault();
         
