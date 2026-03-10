@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Ball - LEGO Edition</title>
+    <title>LUMIN - Neon Arcade</title>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -51,20 +51,25 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #050505; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: 'Courier New', Courier, monospace; touch-action: none; }
         .dimmed { filter: brightness(0.3) blur(2px); transition: filter 0.5s ease; pointer-events: none; }
-        #nick-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
-        #nick-input { background: #111; border: 2px solid #f0f; color: #fff; padding: 10px; font-size: 20px; text-align: center; outline: none; margin-bottom: 20px; }
-        #start-btn { background: #f0f; color: #fff; border: none; padding: 10px 30px; font-weight: bold; cursor: pointer; }
+        
+        #nick-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; touch-action: auto; }
+        #nick-input { background: #111; border: 2px solid #f0f; color: #fff; padding: 10px; font-size: 20px; text-align: center; outline: none; margin-bottom: 20px; touch-action: manipulation; }
+        #start-btn { background: #f0f; color: #fff; border: none; padding: 10px 30px; font-weight: bold; cursor: pointer; touch-action: manipulation; }
+        
         #scoreboard { width: 400px; background: #000; border: 2px solid #444; border-bottom: none; box-sizing: border-box; display: flex; justify-content: space-around; padding: 15px 0; transition: filter 0.5s ease; }
         .stat-box { text-align: center; }
         .label { font-size: 14px; display: block; text-transform: uppercase; letter-spacing: 3px; color: #aaa; margin-bottom: 6px; font-weight: bold; }
         #currentScore { color: #0ff; text-shadow: 0 0 12px #0ff; }
         #bestScore { color: #f0f; text-shadow: 0 0 12px #f0f; }
         .value { font-size: 36px; font-weight: bold; }
-        canvas { border: 2px solid #444; background-color: #000; max-width: 100%; display: block; transition: filter 0.5s ease; }
+        
+        canvas { border: 2px solid #444; background-color: #000; max-width: 100%; display: block; transition: filter 0.5s ease; touch-action: none; -webkit-tap-highlight-color: transparent; }
+        
         #game-over-ui { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); width: 280px; display: none; flex-direction: column; align-items: center; z-index: 20; pointer-events: none; }
         .go-title { color: #fff; font-size: 38px; font-weight: bold; margin-bottom: 5px; text-shadow: 0 0 15px #f0f; }
         .replay-btn { color: #fff; font-size: 18px; margin-bottom: 20px; font-weight: bold; text-shadow: 0 0 10px #0ff; animation: subtelneMiganie 1.5s ease-in-out infinite; }
         @keyframes subtelneMiganie { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.95); } }
+        
         #leaderboard { width: 100%; background: rgba(20, 20, 20, 0.95); border: 2px solid #0ff; color: #fff; padding: 15px; text-align: center; box-sizing: border-box; box-shadow: 0 0 20px rgba(0, 255, 255, 0.3); }
         #ad-container { width: 400px; height: 45px; background: #000; border: 2px solid #444; border-top: none; box-sizing: border-box; position: relative; overflow: hidden; cursor: pointer; display: flex; align-items: center; padding-left: 10px; transition: filter 0.5s ease; }
         #yt-logo { width: 24px; height: 18px; background: #f00; border-radius: 4px; position: relative; display: flex; align-items: center; justify-content: center; margin-right: 10px; flex-shrink: 0; z-index: 2; }
@@ -77,8 +82,8 @@
 <body>
 
     <div id="nick-overlay">
-        <h2 style="color: #0ff;">PILOT IDENTIFICATION</h2>
-        <input type="text" id="nick-input" placeholder="Enter Nick..." maxlength="10">
+        <h2 style="color: #0ff; letter-spacing: 2px;">PILOT IDENTIFICATION</h2>
+        <input type="text" id="nick-input" placeholder="Enter Nick..." maxlength="10" autocomplete="off">
         <button id="start-btn">ENGAGE</button>
     </div>
 
@@ -120,7 +125,7 @@
     window.playerNick = localStorage.getItem("neonBallNick") || "";
     if(window.playerNick) nickInput.value = window.playerNick;
 
-    document.getElementById("start-btn").onclick = () => {
+    document.getElementById("start-btn").onclick = (e) => {
         if(nickInput.value.length < 2) return alert("Nick too short!");
         window.playerNick = nickInput.value;
         localStorage.setItem("neonBallNick", window.playerNick);
@@ -183,9 +188,7 @@
     bestScoreElement.innerText = bestScore;
     let gameActive = false, gameStarted = false, canRestart = true, firstLoad = true, frameCount = 0;
     
-    // DODANO: trail[] do obiektu ball
     const ball = { x: 100, y: 300, radius: 12, gravity: 0.6, velocity: 0, jump: -8, color: "#f0f", trail: [] };
-    
     let pipes = []; const pipeWidth = 55, basePipeGap = 165, pipeSpeed = 3.2;
 
     function createPipe() {
@@ -207,19 +210,15 @@
         });
 
         if (gameActive || !gameStarted) {
-            // RYSOWANIE OGONA (trail)
             ball.trail.forEach((pos, index) => {
                 const alpha = 1 - (index / ball.trail.length);
-                ctx.globalAlpha = alpha * 0.4; // Przezroczystość ogona
+                ctx.globalAlpha = alpha * 0.4;
                 ctx.beginPath();
-                // Ogon przesuwa się lekko w lewo (index * 2) i zwęża
                 ctx.arc(pos.x - (index * 2), pos.y, ball.radius * (1 - index/15), 0, Math.PI * 2);
                 ctx.fillStyle = ball.color;
                 ctx.fill();
             });
             ctx.globalAlpha = 1.0;
-
-            // RYSOWANIE KULKI
             ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
             ctx.fillStyle = ball.color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
         }
@@ -240,12 +239,9 @@
     function update() {
         if (!gameActive || !gameStarted) return;
         frameCount++; 
-        
-        // Aktualizacja fizyki kulki
         ball.velocity += ball.gravity; 
         ball.y += ball.velocity;
 
-        // AKTUALIZACJA OGONA
         ball.trail.unshift({ x: ball.x, y: ball.y });
         if (ball.trail.length > 12) ball.trail.pop();
 
@@ -287,16 +283,19 @@
     }
 
     function handleAction(e) {
+        // POPRAWKA: Jeśli overlay z nickiem jest widoczny, nie blokuj akcji (klawiatury/przycisku)
+        if (nickOverlay.style.display !== "none") return;
+
         if (e.type === "keydown" && e.code !== "Space") return;
         if (e.cancelable) e.preventDefault();
+        
         if (gameActive) {
             if (!gameStarted) { gameStarted = true; firstLoad = false; }
             ball.velocity = ball.jump; sfx.jump();
-        } else if (canRestart && nickOverlay.style.display === "none") {
+        } else if (canRestart) {
             canvas.classList.remove('dimmed'); scoreboard.classList.remove('dimmed'); adContainer.classList.remove('dimmed');
             ball.y = 300; ball.velocity = ball.jump; pipes = []; score = 0; scoreElement.innerText = "0";
-            ball.trail = []; // Reset ogona przy restarcie
-            particles = []; frameCount = 0; gameActive = true; gameStarted = true; 
+            ball.trail = []; particles = []; frameCount = 0; gameActive = true; gameStarted = true; 
             gameOverUI.style.display = "none"; sfx.jump();
         }
     }
