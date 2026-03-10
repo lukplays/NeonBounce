@@ -56,7 +56,7 @@
             margin: 0; padding: 0; width: 100%; height: 100%;
             overflow: hidden; background-color: #050505; 
             display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            font-family: 'Courier New', Courier, monospace; touch-action: none; 
+            font-family: 'Courier New', Courier, monospace; touch-action: manipulation; 
         }
 
         .dimmed { filter: brightness(0.3) blur(2px); transition: filter 0.5s ease; pointer-events: none; }
@@ -172,7 +172,7 @@
     window.playerNick = localStorage.getItem("neonBallNick") || "";
     if(window.playerNick) nickInput.value = window.playerNick;
 
-    document.getElementById("start-btn").onclick = (e) => {
+    function doStart() {
         if(nickInput.value.length < 2) return alert("Nick too short!");
         window.playerNick = nickInput.value;
         localStorage.setItem("neonBallNick", window.playerNick);
@@ -180,7 +180,10 @@
         gameActive = true;
         gameStarted = false; // czeka na pierwsze tapnięcie
         if(window.loadLeaderboard) window.loadLeaderboard();
-    };
+    }
+    const startBtn = document.getElementById("start-btn");
+    startBtn.addEventListener("click", doStart);
+    startBtn.addEventListener("touchend", (e) => { e.preventDefault(); doStart(); });
 
     const myVideos = ["L3JZS2R_D6k","BJU6OyDPMEY","BzM9CYuPW8M"];
     const adTexts = ["Build LEGO Cars!", "Epic MOCs!"];
